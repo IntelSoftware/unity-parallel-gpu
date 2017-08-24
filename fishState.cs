@@ -19,6 +19,26 @@ public class fishState {
 		rotation = state.rotation;
 		lerp = state.lerp;
 	}
+	/*
+	public fishState(float s, Vector3 pos, Vector3 fwd, Vector3 dir, Quaternion rot){
+		speed = s;
+		position = pos;
+		forward = fwd;
+		direction = dir;
+		rotation = rot;
+		lerp = rot;
+	}
+	*/
+
+	public fishState(float s, Vector3 pos, Vector3 dir, Vector3 fwd, Quaternion rot, Quaternion lrp){
+		speed = s;
+		position = pos;
+		forward = fwd;
+		direction = dir;
+		rotation = rot;
+		lerp = rot;
+	}
+
 
 	public void Set(float s, Vector3 pos, Vector3 dir, Vector3 fwd, Quaternion rot, Quaternion lrp){
 		speed = s;
