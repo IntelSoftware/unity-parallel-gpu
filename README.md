@@ -10,3 +10,5 @@ FPSDisplay.cs : Script to display the frames per second.
 moveCam.cs :  Script to move the camera using the directional keys and the mouse.
   
 Parallel.cs : Class providing the ability to do multithreading.
+
+Different .unitypackage and a guide also provided, about how to set Unity.
