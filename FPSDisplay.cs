@@ -1,6 +1,7 @@
 ﻿using System.Collections;
 using UnityEngine;
 
+// Displaying the actual FPS rate of the application
 public class FPSDisplay : MonoBehaviour {
 
 
@@ -8,7 +9,7 @@ public class FPSDisplay : MonoBehaviour {
 
 	void Update()
 	{
-		deltaTime += (Time.deltaTime - deltaTime) * 0.1f;
+		deltaTime += (Time.deltaTime - deltaTime) * 0.1f;	// Smooth evolution of the FPS, to avoid sudden changes
 	}
 
 	void OnGUI()

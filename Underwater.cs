@@ -2,39 +2,42 @@
 using System.Collections.Generic;
 using UnityEngine;
 
+// Depending of the position of the camera
+// Changing some rendering parameters
+// Like enabling a fog, along with a background color
+// To give a sort of underwater effect
+
 public class Underwater : MonoBehaviour {
 
-	public Terrain terrain;
 	public Camera cam;
 
-	bool fog;
-	Color fogColor;
-	float fogDensity;
-	Material skybox;
+	bool defaultFog;
+	Color defaultFogColor;
+	float defaultFogDensity;
+	Material defaultSkyBox;
 	Material noSkybox;
 
-	// Use this for initialization
+	public static float limit;
 	void Start () {
-		fog = RenderSettings.fog;
-		fogColor = RenderSettings.fogColor;
-		fogDensity = RenderSettings.fogDensity;
-		skybox = RenderSettings.skybox;
+		defaultFog = RenderSettings.fog;
+		defaultFogColor = RenderSettings.fogColor;
+		defaultFogDensity = RenderSettings.fogDensity;
+		defaultSkyBox = RenderSettings.skybox;
 		cam.backgroundColor = new Color (0, 0.4f, 0.7f, 1);
 	}
 	
 	// Update is called once per frame
 	void Update () {
-		// adding an effect to the camera, a fog, to give the impression of being underwater, with a different background, ie water.
-		if (main.mode && transform.position.y < -terrain.transform.position.y) {
+		if (transform.position.y < limit) {	// if camera under lvl of water -> underwater render settings
 			RenderSettings.fog = true;
 			RenderSettings.fogColor = new Color (0, 0.4f, 0.7f, 0.6f);
 			RenderSettings.fogDensity = 0.04f;
 			RenderSettings.skybox = noSkybox;
 		} else {
-			RenderSettings.fog = fog;
-			RenderSettings.fogColor = fogColor;
-			RenderSettings.fogDensity = fogDensity;
-			RenderSettings.skybox = skybox;
+			RenderSettings.fog = defaultFog;
+			RenderSettings.fogColor = defaultFogColor;
+			RenderSettings.fogDensity = defaultFogDensity;
+			RenderSettings.skybox = defaultSkyBox;
 		}
 	}
 }

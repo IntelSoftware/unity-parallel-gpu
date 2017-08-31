@@ -18,22 +18,21 @@ public class main : MonoBehaviour {
 	// Parameters of the application
 	public static float tankHeight = 5f;	// height of the tank
 	public static bool mode = true;			// false: aquarium - 	true: water
-	bool multithreading = false;				// using CPU multithreading or not
+	bool multithreading = false;			// using CPU multithreading or not
 	float distNeighbor = 1.1f;				// maximal distance for two fishes to create a flock together
 	int numFishes = 300;					// number of fishes
 	int instanceLimit = 1023;				// max number of instances which could be drawn at the same time
 
 	// Movement and scene properties
 	float deltaTime;
-	Quaternion rotX;
 	const float max_speed = 3.5f, rotationSpeed = 2.2f * 7, outOfBoundsSpeed = 7;
 	const float avoid_velocity = 0.3f, direction_velocity = 8;
 	const float length = 4.0f, depth = 2.75f;
-	Vector3 scale = Vector3.one * 100;
+	Vector3 scale = Vector3.one;
 	float borderX, borderY, borderZ;
 
 	// data
-	Matrix4x4[][] fishesArray;					// contains properties needed to draw the fishes
+	Matrix4x4[][] fishesArray;		// contains properties needed to draw the fishes
 	fishState[][] states;			// physical properties of the fish to calculate the flocks
 	int nbmat, left, idx = 0;
 
@@ -79,7 +78,7 @@ public class main : MonoBehaviour {
 	void Calc(int index){
 		fishState other, current = states [read] [index];
 		Vector3 center = Vector3.zero, forward = Vector3.zero, avoid = Vector3.zero, position = current.position, curfwd = current.forward;
-		Quaternion rotation = current.rotation, lerp = current.lerp;
+		Quaternion rotation = current.rotation;
 		float speed = 0.0f, curspeed = current.speed;
 		int numNeighbors = 0;
 		System.Random random = new System.Random ();
@@ -89,8 +88,8 @@ public class main : MonoBehaviour {
 			if (index != j) {
 				other = states [read] [j];
 				Vector3 othpos = other.position, othfwd = other.forward;		
-				if(Call(position.x, othpos.x, distNeighbor)){
-					float dist = Vector3.Distance (othpos, position);			// skip testing the distance which is taking time
+				if(Call(position.x, othpos.x, distNeighbor)){			// Check if the x-position of two fishes is close enough to create a flock
+					float dist = Vector3.Distance (othpos, position);	// To avoid always calculating the distance, which is quite heavy		
 					if (Neighbor (othfwd, curfwd, dist, distNeighbor)) {		
 						numNeighbors++;										// UPDATE FLOCKING BEHAVIOR
 						center += othpos;				// COHESION
@@ -106,7 +105,7 @@ public class main : MonoBehaviour {
 		if (numNeighbors == 0) {	// if the fish has no one to swim with
 			speed = curspeed;
 			forward = curfwd;
-		} else {	// if not alone, updating its direction considering its neighbors <-> flocking rules
+		} else {					// if not alone, updating its properties considering its neighbors <-> flocking rules
 			forward = (direction_velocity * forward / numNeighbors) + (avoid_velocity * avoid) + (center / numNeighbors) + curfwd - position;
 			speed = curspeed + (((speed / numNeighbors) - curspeed) * 0.50f);	// linearly converges to the average speed of the flock
 		}
@@ -121,15 +120,15 @@ public class main : MonoBehaviour {
 			
 		position += (forward.normalized * deltaTime * speed);	// Translate the fish
 
-		if (forward != Vector3.zero) {	
-			lerp = Quaternion.Slerp (lerp, Quaternion.LookRotation (forward), rotationSpeed * deltaTime);
-			rotation = lerp * rotX;									// Rotate the fish towards its forward direction
-		}
-
-		states[write][index].Set(speed, position, forward.normalized, rotation, lerp);	// update the write state buffer
+		if (forward != Vector3.zero) 
+			rotation = Quaternion.Slerp (rotation, Quaternion.LookRotation (forward), rotationSpeed * deltaTime); // Rotate the fish towards its forward direction
+		
+		states[write][index].Set(speed, position, forward.normalized, rotation);		// update the write state buffer
 		fishesArray [idx] [index % instanceLimit].SetTRS (position, rotation, scale);	// update the matrix to draw the fishes
 	}
 
+	// If two fishes are close enough to maybe be neighbors
+	// Considering their x-position
 	bool Call(float xA, float xB, float limit){
 		float abs = (xA - xB);
 		abs *= abs;
@@ -138,7 +137,8 @@ public class main : MonoBehaviour {
 		return false;
 	}
 				
-	// If two fishes could be considered as neighbors or not. Depending of their distance but the direction they are facing also, using dot product of vectors.
+	// If two fishes could be considered as neighbors or not. 
+	// Depending of their distance but also their forward direction, using dot product of vectors.
 	bool Neighbor(Vector3 selected, Vector3 focus, float dist, float neighbor){
 		if (dist > neighbor) {
 			return false;
@@ -174,12 +174,10 @@ public class main : MonoBehaviour {
 		while (pos == goal) 
 			goal = new Vector3 (Random.Range(-borderX, borderX), Random.Range(-borderY, borderY), Random.Range(-borderZ, borderZ));
 		Vector3 forward = (goal - pos).normalized;
-
-		// rotate to make it face its direction
-		Quaternion lerp = Quaternion.Slerp(Quaternion.identity,Quaternion.LookRotation (forward), rotationSpeed * Time.deltaTime);
-		Quaternion rotation = lerp * rotX;
+		// rotate to make it face its randomly set direction
+		Quaternion rotation = Quaternion.Slerp(Quaternion.identity,Quaternion.LookRotation (forward), rotationSpeed * Time.deltaTime);
 		// initialize the read/write buffer with the state of the fish
-		states [0][i] = new fishState (speed, pos, forward, rotation, lerp);
+		states [0][i] = new fishState (speed, pos, forward, rotation);
 		states [1][i] = new fishState (states [0][i]);
 	}
 
@@ -191,9 +189,8 @@ public class main : MonoBehaviour {
 		states [0] = new fishState[numFishes];
 		states [1] = new fishState[numFishes];
 
-		rotX = Quaternion.AngleAxis (-90, new Vector3 (1, 0, 0));		// Create an additional quaternion to make the fish facing its direction (because of the imported mesh axis)
 		nbmat = Mathf.CeilToInt (numFishes / (float)instanceLimit);		// Number of matrices which need to be created to draw all the instances
-		left = numFishes - ((nbmat - 1) * instanceLimit);
+		left = numFishes - ((nbmat - 1) * instanceLimit);				// Number of instances in the last matrix, as it could be less than 1023
 		fishesArray = new Matrix4x4[nbmat][];							// Creation of the matrices
 		for (int i = 0; i < nbmat; i++) {
 			if (i != nbmat - 1)
@@ -222,6 +219,7 @@ public class main : MonoBehaviour {
 		} else {
 			terrain.transform.position = new Vector3 (-200, -borderY * 1.1f, -200);	
 			water.transform.position = new Vector3 (0, borderY * 1.1f, 0);
+			Underwater.limit = -terrain.transform.position.y;
 			ground.SetActive (false);
 			tank.SetActive (false);
 		}
