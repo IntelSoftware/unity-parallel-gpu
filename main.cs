@@ -220,6 +220,7 @@ public class main : MonoBehaviour {
 			terrain.transform.position = new Vector3 (-200, -borderY * 1.1f, -200);	
 			water.transform.position = new Vector3 (0, borderY * 1.1f, 0);
 			Underwater.limit = -terrain.transform.position.y;
+			Underwater.mode = true;
 			ground.SetActive (false);
 			tank.SetActive (false);
 		}
