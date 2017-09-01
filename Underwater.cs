@@ -11,19 +11,19 @@ public class Underwater : MonoBehaviour {
 
 	public Camera cam;
 
-	bool defaultFog;
-	Color defaultFogColor;
-	float defaultFogDensity;
-	Material defaultSkyBox;
+	bool fog;
+	Color fogColor;
+	float fogDensity;
+	Material skybox;
 	Material noSkybox;
 
 	public static float limit;
-	public static bool mode;
+	public static bool mode = false;
 	void Start () {
-		defaultFog = RenderSettings.fog;
-		defaultFogColor = RenderSettings.fogColor;
-		defaultFogDensity = RenderSettings.fogDensity;
-		defaultSkyBox = RenderSettings.skybox;
+		fog = RenderSettings.fog;
+		fogColor = RenderSettings.fogColor;
+		fogDensity = RenderSettings.fogDensity;
+		skybox = RenderSettings.skybox;
 		cam.backgroundColor = new Color (0, 0.4f, 0.7f, 1);
 	}
 	
@@ -35,10 +35,10 @@ public class Underwater : MonoBehaviour {
 			RenderSettings.fogDensity = 0.04f;
 			RenderSettings.skybox = noSkybox;
 		} else {
-			RenderSettings.fog = defaultFog;
-			RenderSettings.fogColor = defaultFogColor;
-			RenderSettings.fogDensity = defaultFogDensity;
-			RenderSettings.skybox = defaultSkyBox;
+			RenderSettings.fog = fog;
+			RenderSettings.fogColor = fogColor;
+			RenderSettings.fogDensity = fogDensity;
+			RenderSettings.skybox = skybox;
 		}
 	}
 }
