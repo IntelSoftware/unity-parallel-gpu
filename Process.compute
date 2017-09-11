@@ -1,0 +1,172 @@
+﻿// Each #kernel tells which function to compile; you can have many kernels
+#pragma kernel Calc
+
+class State{
+	float speed;
+	float3 position, forward;
+	float4 rotation;
+};
+
+float2 settings;
+float3 borders;
+float2 velocities;
+float deltaTime;
+float3 speeds;
+
+#define MAX_SPEED			speeds.x
+#define ROT_SPEED			speeds.y
+#define OOBOUNDS_SPEED		speeds.z
+
+#define TOTAL_FISH			settings.x
+#define DIST_NEIGHBOR		settings.y
+
+#define BORDER_X			borders.x
+#define BORDER_Y			borders.y
+#define BORDER_Z			borders.z
+
+#define AVOID_VELOCITY		velocities.x
+#define DIR_VELOCITY		velocities.y
+
+#define DELTA_TIME			deltaTime
+
+RWStructuredBuffer<State> readState;
+RWStructuredBuffer<State> writeState;
+
+bool Neighbor(float3 other, float3 curr, float dist, float limit);
+bool OutofBounds(float3 position);
+float3 random ( float3 low, float3 high );
+float random ( float low, float high );
+void seed ( int value );
+
+// [numthreads(1024,1,1)] (16,8,8) (32,32,1)
+[numthreads(16,8,8)]
+void Calc (uint id : SV_GroupIndex, uint3 idT : SV_GroupID)	// uint3 SV_DispatchThreadID ou uint SV_GroupIndex
+{
+	int numNeighbors = 0, index = 16*8*8/4*idT.x + id;
+	State other, current = readState[index];
+	float speed = 0;
+	float3 zero = {0,0,0},one = {BORDER_X,BORDER_Y,BORDER_Z};		// "one" represent the biggest point in the tank, use for the range of the random function
+	float3 position = current.position, curfwd = current.forward, center = zero, forward  = zero, avoid  = zero;
+	float4 rotation = current.rotation;
+	// Each fish has to look at all the other fishes, if one is close enough to create a flock, the flocking behavior is set.
+	for(int i= 0; i<TOTAL_FISH; i++){
+		if(i!= index){
+			other = readState[i];
+			float3 othpos = other.position;
+			if((abs(othpos.x - position.x) < DIST_NEIGHBOR)){	// if along the x axis the fishes are further than distance Neighbor
+				float dist = distance(position, othpos);		// skip testing the distance which is taking time
+				if(Neighbor(other.forward, current.forward, dist, DIST_NEIGHBOR )){		
+					numNeighbors++;											// UPDATE FLOCKING BEHAVIOR
+					center += othpos;					// COHESION
+					speed += other.speed;
+					forward += other.forward;			// ALIGNMENT
+					if(dist < 0.3)
+						avoid += normalize(position - othpos) / dist;	// SEPARATION
+				}
+			}
+		}
+	}
+
+	if(numNeighbors == 0)		// if the fish has no one to swim with
+	{
+		speed = current.speed;
+		forward = curfwd;
+	}
+	else				// if not alone, updating its properties considering its neighbors <-> flocking rules
+	{
+		forward = (DIR_VELOCITY * forward / numNeighbors) + (AVOID_VELOCITY * avoid) + (center / numNeighbors) + curfwd - position;
+		speed = current.speed +(((speed/numNeighbors)-current.speed)*0.5);	// linearly converges to the average speed of the flock
+	}
+
+	if(OutofBounds(position)){		// if a fish reaches the limit of the area, change its direction & speed
+		speed = MAX_SPEED * random(0.01, 1.01);
+		seed((int)(index+3) * DELTA_TIME*1000 * (100*speed));
+		forward = normalize(forward) + (DELTA_TIME * OOBOUNDS_SPEED *(random(-one,one) - position));
+		seed((int)(index+4) * DELTA_TIME*1000 * (100*speed));
+	}
+
+	position += DELTA_TIME * speed * normalize(forward);		// translate the fish
+
+	writeState[index].speed = speed;
+	writeState[index].position = position;					// updating every properties which are not rotations
+	writeState[index].forward = normalize(forward);
+}
+
+// If two fishes could be considered as neighbors or not. Depending of their distance but also the direcion they are facing, using dot product.
+bool Neighbor(float3 other, float3 curr, float dist, float limit){
+	if(dist > limit)	// if distance greater than the neighbor limit
+		return false; 
+	float scal = dot(other, curr);
+	float test, a, b, c = 0.5 * limit;
+	if(scal<0){
+		a = -0.2 * limit;
+		b = a + c;
+	}
+	else{
+		a = -0.24 * limit;		// if they are facing almost the same direction (dot product > 0)
+		b = -a + 0.5 * limit;	// they're likely more suitable to be in the same flock
+	}
+	test = (pow(scal,2)*a) + (b*scal) + c;	// maximal distance to get them as neighbors regarding their properties - quadratic function
+	return dist <= test;
+}
+
+bool OutofBounds(float3 position){
+	if (abs(position.x) >= BORDER_X)
+		return true;
+	if (abs(position.y) >= BORDER_Y)
+		return true;
+	if (abs(position.z) >= BORDER_Z)
+		return true;
+	return false;
+}
+
+// Random HLSL functions, provided by NVidia
+
+#define RANDOM_IA 16807
+#define RANDOM_IM 2147483647
+#define RANDOM_AM (1.0f/float(RANDOM_IM))
+#define RANDOM_IQ 127773
+#define RANDOM_IR 2836
+#define RANDOM_MASK 123459876
+
+
+int random_x;
+
+
+float random ()
+{
+	int k;
+	float ans;
+	
+	random_x ^= RANDOM_MASK;
+	k = random_x / RANDOM_IQ;
+	random_x = RANDOM_IA * (random_x - k * RANDOM_IQ ) - RANDOM_IR * k;
+	
+	if ( random_x < 0 ) 
+		random_x += RANDOM_IM;
+	
+	ans = RANDOM_AM * random_x;
+	random_x ^= RANDOM_MASK;
+	
+	return ans;
+}
+
+
+float random ( float low, float high )
+{
+	float v = random();
+	return low * ( 1.0f - v ) + high * v;
+}
+
+float3 random ( float3 low, float3 high )
+{
+	float3 v = float3( random(), random(), random() );
+	return low * ( 1.0f - v ) + high * v;
+}
+
+
+void seed ( int value )
+{
+	random_x = value;
+	random();
+}

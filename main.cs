@@ -3,7 +3,35 @@ using System.Collections.Generic;
 using UnityEngine;
 
 public class main : MonoBehaviour {
+	struct fishState {
+
+		public float speed;
+		public Vector3 position, forward;
+		public  Quaternion rotation;	
+
+		public fishState(fishState state){
+			speed = state.speed;
+			position = state.position;
+			forward = state.forward;
+			rotation = state.rotation;
+		}
+
+		public fishState(float s, Vector3 pos, Vector3 fwd, Quaternion rot){
+			speed = s;
+			position = pos;
+			forward = fwd;
+			rotation = rot;
+		}
+
+		public void Set(float s, Vector3 pos, Vector3 fwd, Quaternion rot){
+			speed = s;
+			position = pos;
+			forward = fwd;
+			rotation = rot;
+		}
+	};
 	//	Links to the items we want to display
+	public ComputeShader shader;
 		// Fish
 	public Mesh mesh;
 	public Material material;
@@ -18,23 +46,39 @@ public class main : MonoBehaviour {
 	// Parameters of the application
 	public static float tankHeight = 5f;	// height of the tank
 	public static bool mode = true;			// false: aquarium - 	true: water
-	bool multithreading = false;			// using CPU multithreading or not
-	float distNeighbor = 1.1f;				// maximal distance for two fishes to create a flock together
-	int numFishes = 300;					// number of fishes
+	int appMode = 02;						// 0: Single thread		1: Multi thread		2:	GPU
+	float distNeighbor = 1.1f;				// maximal distance for two fish to create a flock together
+	int numFishes = 500;					// number of fish
 	int instanceLimit = 1023;				// max number of instances which could be drawn at the same time
 
-	// Movement and scene properties
-	float deltaTime;
+	// Movement and scene properties	-- constants
+	float deltaTime; // time to complete the last frame
+
+	//Speeds : Maximum speed for a fish, rotation speed
+		//speed to add when near to the limits of the area (i.e edge reactivity)
 	const float max_speed = 3.5f, rotationSpeed = 2.2f * 7, outOfBoundsSpeed = 7;
+	// Flocking : weight/velocity of each flocking rule. 
+		//cohesion velocity is not provided, should be left with a unit weight
 	const float avoid_velocity = 0.3f, direction_velocity = 8;
+	// Dimension : How long/deep the area will be
+		// related to the height. how many times longer/deeper than higher
 	const float length = 4.0f, depth = 2.75f;
-	Vector3 scale = Vector3.one;
+	// Borders of the area following each direction
 	float borderX, borderY, borderZ;
+	Vector3 scale = Vector3.one;	// scale of the mesh to draw, keeping this the same for all fishes. 
+
+
+	public delegate void Updater();
+	Updater updater;
+	public delegate void UpdaterMode(int i, int max);
+	UpdaterMode updaterMode;
 
 	// data
-	Matrix4x4[][] fishesArray;		// contains properties needed to draw the fishes
+	Matrix4x4[][] fishArray;		// contains properties needed to draw the fish
 	fishState[][] states;			// physical properties of the fish to calculate the flocks
-	int nbmat, left, idx = 0;
+	int nbmat, left;				// number of matrices to store all the instances of fish, and number of fish left in the last matrix
+	int nbGroups;					// GPU : number of group of threads which are needed to compute the calculation, 1 thread per fish
+	int idx = 0;					
 
 	// swap list for read/write
 	int read = 0, write = 1, tmp;
@@ -52,27 +96,34 @@ public class main : MonoBehaviour {
 			
 	// Update is called once per frame
 	void Update () {
-		deltaTime = Time.deltaTime;
-		idx = 0;
-		for (int i = 0; i < nbmat; i++) {	// To draw the fishes, several calls have to be done because of the max number of instances per draw (1023)
-			if (i == (nbmat - 1)) {
-				if (multithreading) 		// if multithreading if enabled, use parallel for
-					Parallel.For (0, left, delegate (int id) {Calc (id + i*instanceLimit);});
-				else 						// if not, singlethread for loop
-					for (int j = 0; j < left; j++) {Calc (j + i*instanceLimit);}
-			} else {
-				if (multithreading) 
-					Parallel.For (0, instanceLimit, delegate (int id) {Calc (id + i*instanceLimit);});
-			 	else 
-					for (int j = 0; j < instanceLimit; j++) {Calc (j + i*instanceLimit);}
-			}
-			Graphics.DrawMeshInstanced (mesh, 0, material, fishesArray[i]);
-			idx++;
-		}
-		tmp = read;			// swap between read and write buffers
-		read = write;		
-		write = tmp;
+		updater ();
 	}
+
+
+		
+
+	void UpdateStates(int i){		// called for each fish after the shader has done all calculations		
+		if (states [write] [i].forward != Vector3.zero) 
+			states[write][i].rotation = Quaternion.Slerp(states[read][i].rotation, Quaternion.LookRotation(states[write][i].forward), rotationSpeed * deltaTime);
+
+		fishArray [idx] [i % instanceLimit].SetTRS(states [write] [i].position, states [write] [i].rotation, scale);	// setting the TRS matrix to draw the fish
+	}
+
+	void RunShader(){
+		int kernel = shader.FindKernel ("Calc");
+		// Once the kernel is found in the shader, setting and filling the buffers
+		ComputeBuffer rState = new ComputeBuffer (numFishes, System.Runtime.InteropServices.Marshal.SizeOf (states[0][0]));
+		ComputeBuffer wState = new ComputeBuffer (numFishes, System.Runtime.InteropServices.Marshal.SizeOf (states[0][0]));
+		shader.SetBuffer (kernel, "readState", rState);	
+		shader.SetBuffer(kernel, "writeState", wState);
+		rState.SetData (states[read]);
+		wState.SetData (states [write]);
+		shader.Dispatch (kernel, nbGroups, 1, 1);
+		// Once the work is done, get back the written data and save it
+		wState.GetData (states[write]);
+		wState.Release ();
+		rState.Release ();
+	}	
 										
 	//	Update the properties of each fish
 	void Calc(int index){
@@ -83,12 +134,12 @@ public class main : MonoBehaviour {
 		int numNeighbors = 0;
 		System.Random random = new System.Random ();
 
-		// Each fish has to look at all the other fishes, if one is close enough to create a flock, the flocking behavior is set.
+		// Each fish has to look at all the other fish, if one is close enough to create a flock, the flocking behavior is set.
 		for (int j = 0; j < numFishes; j++) {
 			if (index != j) {
 				other = states [read] [j];
 				Vector3 othpos = other.position, othfwd = other.forward;		
-				if(Call(position.x, othpos.x, distNeighbor)){			// Check if the x-position of two fishes is close enough to create a flock
+				if(Call(position.x, othpos.x, distNeighbor)){			// Check if the x-position of two fish is close enough to create a flock
 					float dist = Vector3.Distance (othpos, position);	// To avoid always calculating the distance, which is quite heavy		
 					if (Neighbor (othfwd, curfwd, dist, distNeighbor)) {		
 						numNeighbors++;										// UPDATE FLOCKING BEHAVIOR
@@ -124,10 +175,10 @@ public class main : MonoBehaviour {
 			rotation = Quaternion.Slerp (rotation, Quaternion.LookRotation (forward), rotationSpeed * deltaTime); // Rotate the fish towards its forward direction
 		
 		states[write][index].Set(speed, position, forward.normalized, rotation);		// update the write state buffer
-		fishesArray [idx] [index % instanceLimit].SetTRS (position, rotation, scale);	// update the matrix to draw the fishes
+		fishArray [idx] [index % instanceLimit].SetTRS (position, rotation, scale);	// update the matrix to draw the fish
 	}
 
-	// If two fishes are close enough to maybe be neighbors
+	// If two fish are close enough to maybe be neighbors
 	// Considering their x-position
 	bool Call(float xA, float xB, float limit){
 		float abs = (xA - xB);
@@ -137,7 +188,7 @@ public class main : MonoBehaviour {
 		return false;
 	}
 				
-	// If two fishes could be considered as neighbors or not. 
+	// If two fish could be considered neighbors or not. 
 	// Depending of their distance but also their forward direction, using dot product of vectors.
 	bool Neighbor(Vector3 selected, Vector3 focus, float dist, float neighbor){
 		if (dist > neighbor) {
@@ -184,6 +235,11 @@ public class main : MonoBehaviour {
 	void Init(){
 		getInput ();
 		SetScene ();
+		InitShader ();
+		SetDelegates ();
+
+		int threadsPgroup = 1024/4;					// Shader parameter, number of threads per group, to get the number of groups
+		nbGroups = Mathf.CeilToInt (numFishes / (float)threadsPgroup);
 
 		states = new fishState[2][];
 		states [0] = new fishState[numFishes];
@@ -191,13 +247,100 @@ public class main : MonoBehaviour {
 
 		nbmat = Mathf.CeilToInt (numFishes / (float)instanceLimit);		// Number of matrices which need to be created to draw all the instances
 		left = numFishes - ((nbmat - 1) * instanceLimit);				// Number of instances in the last matrix, as it could be less than 1023
-		fishesArray = new Matrix4x4[nbmat][];							// Creation of the matrices
+		fishArray = new Matrix4x4[nbmat][];							// Creation of the matrices
 		for (int i = 0; i < nbmat; i++) {
 			if (i != nbmat - 1)
-				fishesArray [i] = new Matrix4x4[instanceLimit];
+				fishArray [i] = new Matrix4x4[instanceLimit];
 			else
-				fishesArray [i] = new Matrix4x4[left];
+				fishArray [i] = new Matrix4x4[left];
 		}
+	}
+
+	// Initialization of the data which needs to be sent to the compute shader
+	// For GPU Application
+	void InitShader(){
+		shader.SetVector ("settings", new Vector2 (numFishes, distNeighbor));
+		shader.SetVector ("borders", new Vector3 (borderX, borderY, borderZ));
+		shader.SetVector("velocities", new Vector2(avoid_velocity,direction_velocity));
+		shader.SetVector ("speeds", new Vector3 (max_speed,rotationSpeed,outOfBoundsSpeed));
+
+	}
+
+	// Considering the desired mode : CPU MT/ST or GPU
+	// Set the delegates to execute the right function 
+	// During each frame update
+	void SetDelegates(){
+		if (appMode == 2) {
+			updaterMode = new UpdaterMode (GPU);
+			updater = new Updater (Update_GPU);
+		} else {
+			updater = new Updater (Update_CPU);
+			if (appMode==1)
+				updaterMode = new UpdaterMode (MT);
+			else
+				updaterMode = new UpdaterMode (ST);
+		}
+	}
+
+	// Selected mode : CPU - Multithread
+	// Application of the flocking algorithm 
+	void MT(int i, int max){
+		if(i==max)
+			Parallel.For (0, left, delegate (int id) {Calc (id + i * instanceLimit);});
+		else
+			Parallel.For (0, instanceLimit, delegate (int id) {Calc (id + i * instanceLimit);});
+	}
+
+	// Selected mode : GPU
+	// Update the fish state after the flocking algorithm being executed in the GPU
+	void GPU(int i, int max){
+		if(i==max)
+			Parallel.For (0, left, delegate (int id) {UpdateStates (id + i*instanceLimit);});
+		else
+			Parallel.For(0,instanceLimit,delegate (int id){UpdateStates(id + i*instanceLimit);});	
+	}
+
+	// Selected mode : CPU - Singlethread
+	// Application of the flocking algorithm 
+	void ST(int i, int max){
+		if(i==max)
+			for (int j = 0; j < left; j++) {Calc (j + i*instanceLimit);}
+		else
+			for (int j = 0; j < instanceLimit; j++) {Calc (j + i*instanceLimit);}
+	}
+
+	// Update of the scene if the selected mode is GPU
+	void Update_GPU(){
+		deltaTime = Time.deltaTime;
+		idx = 0;
+
+		shader.SetFloat ("deltaTime", deltaTime);
+		RunShader ();
+		int max = nbmat - 1;
+		for (int j = 0; j < nbmat; j++) {	// To draw the fish, several calls have to be done because of the max number of instances per draw (1023)
+			updaterMode (j, max);
+			Graphics.DrawMeshInstanced (mesh, 0, material, fishArray[j]);
+			idx++;
+		}
+		tmp = read;			// swap between read and write buffers
+		read = write;		
+		write = tmp;
+
+	}
+	// Update of the scene if the selected mode is CPU
+	// Select then between single thread or multi thread
+	void Update_CPU(){
+		deltaTime = Time.deltaTime;
+		idx = 0;
+		int max = nbmat - 1;
+		for (int j = 0; j < nbmat; j++) {	// To draw the fish, several calls have to be done because of the max number of instances per draw (1023)
+			updaterMode (j, max);
+			Graphics.DrawMeshInstanced (mesh, 0, material, fishArray[j]);
+			idx++;
+		}
+		tmp = read;			// swap between read and write buffers
+		read = write;		
+		write = tmp;
 	}
 
 	void SetScene(){
@@ -242,8 +385,10 @@ public class main : MonoBehaviour {
 				input = args[i+1];
 				distNeighbor = float.Parse(input);
 			}
-			if (args [i] == "-m")
-				multithreading = true;
+			if (args [i] == "-m") {
+				input = args[i+1];
+				appMode = System.Convert.ToInt16(input);
+			}
 			if (args [i] == "-s")
 				mode = false;
 		}
