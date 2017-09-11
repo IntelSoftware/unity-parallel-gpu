@@ -42,13 +42,22 @@ public class main : MonoBehaviour {
 	public Terrain terrain;
 	public GameObject water;
 	public GameObject projector;
+	// Obstacles
+	public GameObject rock;
+	GameObject[] rocks;
+	struct s_Rock{
+		public Vector3 position;
+		public float radius;
+	}
+	s_Rock[] obstacles;
 
 	// Parameters of the application
 	public static float tankHeight = 5f;	// height of the tank
 	public static bool mode = true;			// false: aquarium - 	true: water
 	int appMode = 02;						// 0: Single thread		1: Multi thread		2:	GPU
 	float distNeighbor = 1.1f;				// maximal distance for two fish to create a flock together
-	int numFishes = 500;					// number of fish
+	int numFishes = 1000;					// number of fish
+	int numRocks = 50;						// number of rocks into the scene
 	int instanceLimit = 1023;				// max number of instances which could be drawn at the same time
 
 	// Movement and scene properties	-- constants
@@ -78,7 +87,8 @@ public class main : MonoBehaviour {
 	fishState[][] states;			// physical properties of the fish to calculate the flocks
 	int nbmat, left;				// number of matrices to store all the instances of fish, and number of fish left in the last matrix
 	int nbGroups;					// GPU : number of group of threads which are needed to compute the calculation, 1 thread per fish
-	int idx = 0;					
+	int idx = 0;
+	int kernel;						// GPU : index of the function (kernel) inside the compute shader, which needs to be run for the flocking algorithm
 
 	// swap list for read/write
 	int read = 0, write = 1, tmp;
@@ -97,36 +107,31 @@ public class main : MonoBehaviour {
 	// Update is called once per frame
 	void Update () {
 		updater ();
-	}
-
-
-		
+	}		
 
 	void UpdateStates(int i){		// called for each fish after the shader has done all calculations		
 		if (states [write] [i].forward != Vector3.zero) 
-			states[write][i].rotation = Quaternion.Slerp(states[read][i].rotation, Quaternion.LookRotation(states[write][i].forward), rotationSpeed * deltaTime);
-
-		fishArray [idx] [i % instanceLimit].SetTRS(states [write] [i].position, states [write] [i].rotation, scale);	// setting the TRS matrix to draw the fish
+			states[write][i].rotation = Quaternion.Slerp(states[read][i].rotation, 
+					Quaternion.LookRotation(states[write][i].forward), rotationSpeed * deltaTime);
+		// setting the TRS matrix to draw the fish
+		fishArray [idx] [i % instanceLimit].SetTRS(states [write] [i].position, states [write] [i].rotation, scale);	
 	}
 
-	void RunShader(){
-		int kernel = shader.FindKernel ("Calc");
-		// Once the kernel is found in the shader, setting and filling the buffers
+	void RunShader(){			// Setting and filling the buffers about the states of the fishes
 		ComputeBuffer rState = new ComputeBuffer (numFishes, System.Runtime.InteropServices.Marshal.SizeOf (states[0][0]));
 		ComputeBuffer wState = new ComputeBuffer (numFishes, System.Runtime.InteropServices.Marshal.SizeOf (states[0][0]));
 		shader.SetBuffer (kernel, "readState", rState);	
 		shader.SetBuffer(kernel, "writeState", wState);
 		rState.SetData (states[read]);
 		wState.SetData (states [write]);
+		// run the shader : flocking algorithm
 		shader.Dispatch (kernel, nbGroups, 1, 1);
 		// Once the work is done, get back the written data and save it
 		wState.GetData (states[write]);
-		wState.Release ();
-		rState.Release ();
 	}	
 										
-	//	Update the properties of each fish
-	void Calc(int index){
+
+	void Calc(int index){		//	Update the properties of each fish
 		fishState other, current = states [read] [index];
 		Vector3 center = Vector3.zero, forward = Vector3.zero, avoid = Vector3.zero, position = current.position, curfwd = current.forward;
 		Quaternion rotation = current.rotation;
@@ -169,6 +174,7 @@ public class main : MonoBehaviour {
 			speed = (float)random.NextDouble () * max_speed;
 		}
 			
+		forward += Rocks (position, forward, speed, max_speed);	// Check if the fish is close to a rock - if so, add an avoidance force
 		position += (forward.normalized * deltaTime * speed);	// Translate the fish
 
 		if (forward != Vector3.zero) 
@@ -186,6 +192,36 @@ public class main : MonoBehaviour {
 		if (abs < (limit * limit))
 			return true;
 		return false;
+	}
+
+	// Considering a fish
+	// Will check if this fish is about to collide into any rocks of the scene
+	Vector3 Rocks(Vector3 position, Vector3 fwd, float speed, float max){
+		Vector3 avoid;
+		fwd = fwd.normalized * deltaTime * speed;
+		for (int i = 0; i < obstacles.Length; i++) {
+			avoid = Rock (position, fwd, obstacles[i].position, obstacles[i].radius);
+			if (avoid != Vector3.zero) 
+				return avoid;
+		}
+		return Vector3.zero;
+	}
+
+	// Considering a fish
+	// Will check if this fish is about to collide into a rock of the scene
+	Vector3 Rock(Vector3 pos, Vector3 fwd, Vector3 rocpos, float scale){
+		Vector3 avoid = Vector3.zero;	
+		Vector3 ahead = pos + fwd;			
+		Vector3 ahead2 = pos + fwd/2;
+		if(Vector3.Distance(ahead,rocpos) < scale){
+			avoid = (ahead - rocpos).normalized * max_speed;
+			return avoid;
+		}
+		if(Vector3.Distance(ahead2,rocpos) < scale){
+			avoid = (ahead2 - rocpos).normalized * max_speed;
+			return avoid;
+		}
+		return avoid;
 	}
 				
 	// If two fish could be considered neighbors or not. 
@@ -259,11 +295,16 @@ public class main : MonoBehaviour {
 	// Initialization of the data which needs to be sent to the compute shader
 	// For GPU Application
 	void InitShader(){
-		shader.SetVector ("settings", new Vector2 (numFishes, distNeighbor));
+		kernel = shader.FindKernel ("Calc");
+		shader.SetVector ("settings", new Vector3 (numFishes, numRocks, distNeighbor));
 		shader.SetVector ("borders", new Vector3 (borderX, borderY, borderZ));
 		shader.SetVector("velocities", new Vector2(avoid_velocity,direction_velocity));
 		shader.SetVector ("speeds", new Vector3 (max_speed,rotationSpeed,outOfBoundsSpeed));
-
+		if (numRocks > 0) {	 // if we want rocks, setting and filling the rock buffer at start-up, it won't ever change
+			ComputeBuffer bRocks = new ComputeBuffer (numRocks, System.Runtime.InteropServices.Marshal.SizeOf (obstacles[0]));
+			shader.SetBuffer(kernel, "Rocks", bRocks);
+			bRocks.SetData (obstacles);
+		}
 	}
 
 	// Considering the desired mode : CPU MT/ST or GPU
@@ -308,9 +349,8 @@ public class main : MonoBehaviour {
 		else
 			for (int j = 0; j < instanceLimit; j++) {Calc (j + i*instanceLimit);}
 	}
-
-	// Update of the scene if the selected mode is GPU
-	void Update_GPU(){
+		
+	void Update_GPU(){			// Update of the scene if the selected mode is GPU
 		deltaTime = Time.deltaTime;
 		idx = 0;
 
@@ -343,13 +383,25 @@ public class main : MonoBehaviour {
 		write = tmp;
 	}
 
+	// Initializing the scene along with the borders which are different considering the axes
+	// Also considering the selected mode, "water"-like or tank
 	void SetScene(){
-		// Initializing the scene along with the borders which are different considering the axes
-		// Also considering the selected mode, "water"-like or tank
 		borderX = tankHeight * length;
 		borderY = tankHeight/2;
 		borderZ = tankHeight * depth;
 
+		Transform rockT = rock.transform;
+		obstacles = new s_Rock[numRocks];
+		rocks = new GameObject[numRocks];
+		for (int i = 0; i < numRocks; i++) {
+			float scale = Random.Range (0.15f, 1.00f) * tankHeight;
+			Vector3 position = new Vector3 (Random.Range (-borderX, borderX), -borderY + scale*Random.Range(0,0.2f), Random.Range (-borderZ, borderZ)); 
+			obstacles[i].position = position;
+			obstacles[i].radius = scale / 2;
+			rock.transform.localScale = new Vector3 (scale, scale, scale);
+			rocks [i] = (GameObject)Instantiate (rock, position, Quaternion.identity);
+		}
+			
 		if (!mode) {
 			water.SetActive (false);
 			projector.SetActive (false);
@@ -361,7 +413,7 @@ public class main : MonoBehaviour {
 
 		} else {
 			terrain.transform.position = new Vector3 (-200, -borderY * 1.1f, -200);	
-			water.transform.position = new Vector3 (0, borderY * 1.1f, 0);
+			water.transform.position = new Vector3 (0, borderY * 1.15f, 0);
 			Underwater.limit = -terrain.transform.position.y;
 			Underwater.mode = true;
 			ground.SetActive (false);
@@ -369,25 +421,46 @@ public class main : MonoBehaviour {
 		}
 	}
 
-	void getInput(){	// Getting parameters of the application through command line arguments
+	// Getting parameters of the application through command line arguments
+	// if some parameters are less than 0, set them to 0
+	// in the same case, other will stick to their default value
+	// shown under parameters of the application (l54)
+	void getInput(){	
 		string[] args = System.Environment.GetCommandLineArgs ();
 		string input;
 		for(int i=0; i<args.Length; i++){
 			if(args[i] == "-f"){
 				input = args[i+1];
-				numFishes = System.Convert.ToInt16(input);
+				if (System.Convert.ToInt16 (input) < 0)
+					numFishes = 0;
+				else
+					numFishes = System.Convert.ToInt16(input);
 			}
 			if(args[i] == "-t"){
 				input = args[i+1];
-				tankHeight = float.Parse(input);
+				if(float.Parse(input) > 0)
+					tankHeight = float.Parse(input);
 			}
 			if(args[i] == "-n"){
 				input = args[i+1];
-				distNeighbor = float.Parse(input);
+				if (float.Parse (input) < 1)
+					distNeighbor = 0;
+				else
+					distNeighbor = float.Parse(input);
 			}
 			if (args [i] == "-m") {
 				input = args[i+1];
-				appMode = System.Convert.ToInt16(input);
+				if (System.Convert.ToInt16 (input) == 0)
+					appMode = 0;
+				else if (System.Convert.ToInt16 (input) == 1)
+					appMode = 1;
+			}
+			if (args [i] == "-r") {
+				input = args[i+1];
+				if (System.Convert.ToInt16 (input) < 1)
+					numRocks = 0;
+				else
+					numRocks = System.Convert.ToInt16(input);
 			}
 			if (args [i] == "-s")
 				mode = false;

@@ -7,7 +7,12 @@ class State{
 	float4 rotation;
 };
 
-float2 settings;
+class Rock{
+	float3 position;
+	float radius;
+};
+
+float3 settings;
 float3 borders;
 float2 velocities;
 float deltaTime;
@@ -18,7 +23,8 @@ float3 speeds;
 #define OOBOUNDS_SPEED		speeds.z
 
 #define TOTAL_FISH			settings.x
-#define DIST_NEIGHBOR		settings.y
+#define NUM_ROCKS			settings.y
+#define DIST_NEIGHBOR		settings.z
 
 #define BORDER_X			borders.x
 #define BORDER_Y			borders.y
@@ -31,6 +37,7 @@ float3 speeds;
 
 RWStructuredBuffer<State> readState;
 RWStructuredBuffer<State> writeState;
+RWStructuredBuffer<Rock> Rocks;
 
 bool Neighbor(float3 other, float3 curr, float dist, float limit);
 bool OutofBounds(float3 position);
@@ -84,6 +91,26 @@ void Calc (uint id : SV_GroupIndex, uint3 idT : SV_GroupID)	// uint3 SV_Dispatch
 		forward = normalize(forward) + (DELTA_TIME * OOBOUNDS_SPEED *(random(-one,one) - position));
 		seed((int)(index+4) * DELTA_TIME*1000 * (100*speed));
 	}
+
+		// Check if the fish is close to a rock - if so, add an avoidance force
+	int iObs =0;
+	float3 avoidObs = {0,0,0};
+	float3 ahead = position + normalize(forward) * DELTA_TIME * speed;
+	float3 ahead2 = position + normalize(forward) * DELTA_TIME * speed / 2;
+	while(iObs < NUM_ROCKS){
+		if(distance(ahead,Rocks[iObs].position) < Rocks[iObs].radius){
+			avoidObs = normalize(ahead - Rocks[iObs].position) * MAX_SPEED;			// MAX_SPEED ou speed
+			if((avoidObs.x != zero.x)||(avoidObs.y != zero.y)||(avoidObs.z != zero.z))
+				iObs = NUM_ROCKS;
+		}
+		if(distance(ahead2,Rocks[iObs].position) < Rocks[iObs].radius){
+			avoidObs = normalize(ahead2 - Rocks[iObs].position) * MAX_SPEED;
+			if((avoidObs.x != zero.x)||(avoidObs.y != zero.y)||(avoidObs.z != zero.z))
+				iObs = NUM_ROCKS;
+		}	
+		iObs++;
+	}
+	forward += avoidObs;
 
 	position += DELTA_TIME * speed * normalize(forward);		// translate the fish
 
