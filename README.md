@@ -21,9 +21,9 @@ A .unitypackage and a guide also provided, about how to set Unity.
 
 We can also set some parameters from the command line using the following :
 
-- “-t” :  size of the allowed area for the fishes ( <~> tank)
-- “-f” :  number of fishes to display
+- “-t” : size of the allowed area for the fishes ( <~> tank)
+- “-f” : number of fishes to display
 - “-n” : maximal distance for two fishes to be neighbor
-- “-s” : if this is set, display a simpler scene with a visible tank, like below. If not the
-scene will look more realistic with dynamic water, and background
 - “-m” : mode to launch the application. 0: CPU Singlethread. 1: CPU Multithread. 2: GPU.
+- “-s” : (at the END) if this is set, display a simpler scene with a visible tank, like below. If not the
+scene will look more realistic with dynamic water, and background
