@@ -17,18 +17,16 @@ Process.compute : Compute shader written in HLSL to execute the flocking algorit
 
 Underwater.cs : Script to add underwater effects to the scene.
 
-A .unitypackage and a guide also provided, about how to set Unity.
-
 We can also set some parameters from the command line using the following :
 
--“-t” : size of the allowed area for the fishes ( <~> tank)
+- “-t” : size of the allowed area for the fishes ( <~> tank)
 
--“-f” : number of fishes to display
+- “-f” : number of fishes to display
 
--“-r” : number of rocks to add to the scene
+- “-r” : number of rocks to add to the scene
 
--“-n” : maximal distance for two fishes to be neighbor
+- “-n” : maximal distance for two fishes to be neighbor
 
--“-m” : mode to launch the application. 0: CPU Singlethread. 1: CPU Multithread. 2: GPU.
+- “-m” : mode to launch the application. 0: CPU Singlethread. 1: CPU Multithread. 2: GPU.
 
--“-s” : (at the END) if this is set, display a simpler scene with a visible tank, like below. If not the scene will look more realistic with dynamic water, and background
+- “-s” : (at the END) if this is set, display a simpler scene with a visible tank, like below. If not the scene will look more realistic with dynamic water, and background
