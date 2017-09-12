@@ -443,7 +443,7 @@ public class main : MonoBehaviour {
 			}
 			if(args[i] == "-n"){
 				input = args[i+1];
-				if (float.Parse (input) < 1)
+				if (float.Parse (input) < 0)
 					distNeighbor = 0;
 				else
 					distNeighbor = float.Parse(input);
